@@ -24,10 +24,10 @@ new String:substitutes[8][2][64];
 public Plugin:myinfo =
 {
     name = "L4D2 Tank Control",
-    author = "arti",
+    author = "arti, darkid",
     description = "Distributes the role of the tank evenly throughout the team",
-    version = "0.2.1",
-    url = "https://github.com/alexberriman/l4d2-plugins/tree/master/l4d_tank_control"
+    version = "0.2.2",
+    url = "https://github.com/jbzdarkid/TankControl-with-substitutes/blob/master/l4d_tank_control.sp"
 }
 
 enum L4D2Team
@@ -249,6 +249,9 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
                 if (strcmp(substitutes[i][0], "") != 0) {
                     substitutes[i][1] = "";
                     wasRejoin = true;
+                    if (GetConVarBool(hTankDebug)) {
+                        PrintToConsoleAll("[TC-S] Player has rejoined.");
+                    }
                     break;
                 }
             }
@@ -266,9 +269,15 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
             }
             if (index == -1) { // A new player, assume they sub for the first person who needs it.
                 substitutes[firstOpen][0] = steamId;
+                if (GetConVarBool(hTankDebug)) {
+                    PrintToConsoleAll("[TC-S] Player substitute accepted.");
+                }
             } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
                 substitutes[index][1] = substitutes[firstOpen][1];
                 substitutes[firstOpen][1] = "";
+                if (GetConVarBool(hTankDebug)) {
+                    PrintToConsoleAll("[TC-S] Player has rejoined, cleaning substitutions.");
+                }
             }
         }
     }
