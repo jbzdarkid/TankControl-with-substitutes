@@ -94,7 +94,7 @@ public Native_GetTankPool(Handle:plugin, numParams)
         return _:h_tankQueue;
     
     // Remove players who've already had tank from the pool.
-    h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank);
+    h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank, false);
     
     // If the infected pool is empty, remove infected players from pool
     if (GetArraySize(h_tankQueue) == 0) // (when nobody on infected ,error)
@@ -102,8 +102,8 @@ public Native_GetTankPool(Handle:plugin, numParams)
         new Handle:infectedTeam = teamSteamIds(L4D2Team_Infected);
         if (GetArraySize(infectedTeam) > 1)
         {
-            h_whosHadTank = removeTanksFromPool(h_whosHadTank, teamSteamIds(L4D2Team_Infected));
-            h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank);
+            h_whosHadTank = removeTanksFromPool(h_whosHadTank, teamSteamIds(L4D2Team_Infected), false);
+            h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank, false);
         }
     }
     
@@ -461,32 +461,28 @@ public Action:GiveTank_Cmd(client, args)
 public chooseTank()
 {
     // Create our pool of players to choose from
-    new Handle:infectedPool = teamOriginalSteamIds(L4D2Team_Infected);
+    new Handle:infectedPool = teamSteamIds(L4D2Team_Infected);
 
     // Remove players who've already had tank from the pool.
-    infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank);
+    infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, true);
     
     // If there are no valid players, select from the actual players playing, i.e. include possible substitutes.
     if (GetArraySize(infectedPool) == 0) {
         infectedPool = teamSteamIds(L4D2Team_Infected);
-        infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank);
+        infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, false);
     }
-
-
-
 
     // If there are still no valid players, put everyone back into the pool.
     if (GetArraySize(infectedPool) == 0) {
         infectedPool = teamSteamIds(L4D2Team_Infected);
-        new Handle:originalInfectedPool = teamOriginalSteamIds(L4D2Team_Infected);
-        h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool);
-        h_whosHadTank = removeTanksFromPool(h_whosHadTank, originalInfectedPool);
+        h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, false);
+        h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, true);
         // Remove the substitutions, everyone in game has had a tank.
         for (new i = 0; i < 64; i++) {
             new String:steamId[64];
-            GetArrayString(originalInfectedPool, i, steamId, sizeof(steamId));
+            GetArrayString(infectedPool, i, steamId, sizeof(steamId));
             for (new j = 0; j < 8; j++) {
-                if (strcmp(substitutes[j][1], steamId) == 0) {
+                if (strcmp(substitutes[j][0], steamId) == 0) {
                     substitutes[j][0] = "";
                     substitutes[j][1] = "";
                 }
@@ -498,9 +494,6 @@ public chooseTank()
             return;
         }
     }
-
-
-
 
     // Select a random person to become tank
     new rndIndex = GetRandomInt(0, GetArraySize(infectedPool) - 1);
@@ -609,44 +602,6 @@ stock PrintToInfected(const String:Message[], any:... )
 }
 
 /**
- * Returns an array of steam ids for the original players on a particular team.
- *
- * @param L4D2Team:team
- *     The team which to return steam ids for.
- *
- * @return
- *     An array of steam ids.
- */
-
-public Handle:teamOriginalSteamIds(L4D2Team:team)
-{
-    new Handle:steamIds = CreateArray(64);
-    decl String:steamId[64];
-
-    for (new i = 1; i <= MaxClients; i++)
-    {
-        // Basic check
-        if (IsClientConnected(i) && IsClientInGame(i) && ! IsFakeClient(i))
-        {
-            // Checking if on our desired team
-            if (L4D2Team:GetClientTeam(i) != team)
-                continue;
-            GetClientAuthString(i, steamId, sizeof(steamId));
-            for (new j = 0; j < 8; j++) {
-                if (strcmp(substitutes[j][0], steamId) == 0) {
-                    // If this player substituted for another player
-                    steamId = substitutes[j][1];
-                    // Return the original ID instead.
-                    break;
-                }
-            }
-            PushArrayString(steamIds, steamId);
-        }
-    }
-    return steamIds;
-}
-
-/**
  * Returns an array of steam ids for a particular team.
  *
  * @param L4D2Team:team
@@ -683,14 +638,16 @@ public Handle:teamSteamIds(L4D2Team:team)
  *
  * @param Handle:steamIdTankPool
  *     The pool of potential steam ids to become tank.
- * @ param Handle:tanks
+ * @param Handle:tanks
  *     The steam ids of players who've already had tank.
+ * @param bool:substitute
+ *
  *
  * @return
  *     The pool of steam ids who haven't had tank.
  */
  
-public Handle:removeTanksFromPool(Handle:steamIdTankPool, Handle:tanks)
+public Handle:removeTanksFromPool(Handle:steamIdTankPool, Handle:tanks, bool:substitute)
 {
     decl index;
     decl String:steamId[64];
@@ -698,6 +655,15 @@ public Handle:removeTanksFromPool(Handle:steamIdTankPool, Handle:tanks)
     for (new i = 0; i < GetArraySize(tanks); i++)
     {
         GetArrayString(tanks, i, steamId, sizeof(steamId));
+        if (substitute) {
+            for (new j = 0; j < 8; j++) {
+                // Replace the old player name with their substitute. If they've left, remove them anyways.
+                if (strcmp(substitutes[j][1], steamId) == 0 && strcmp(substitutes[j][0], "") != 0) {
+                    steamId = substitutes[j][0];
+                    break;
+                }
+            }
+        }
         index = FindStringInArray(steamIdTankPool, steamId);
         
         if (index != -1)
