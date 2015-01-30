@@ -466,14 +466,37 @@ public chooseTank()
     // Remove players who've already had tank from the pool.
     infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, true);
     
+    if (GetConVarBool(hTankDebug)) {
+        PrintToConsoleAll("[TC-S] Choosing tank from original players...");
+    }
+    
     // If there are no valid players, select from the actual players playing, i.e. include possible substitutes.
     if (GetArraySize(infectedPool) == 0) {
+        if (GetConVarBool(hTankDebug)) {
+            PrintToConsoleAll("[TC-S] No tanks in original pool.");
+            PrintToConsoleAll("[TC-S] Choosing tank from substitutes...");
+        }
         infectedPool = teamSteamIds(L4D2Team_Infected);
         infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, false);
     }
 
+    for (new tank = 0; tank < GetArraySize(infectedPool); tank++) {
+        new String:tankId[64];
+        GetArrayString(infectedPool, tank, tankId, sizeof(tankId));
+        
+        new tankClientId = getInfectedPlayerBySteamId(queuedTankSteamId);
+        
+        new String:name[MAX_NAME_LENGTH];
+        GetClientName(tankClientId, name, sizeof(name));
+        
+        PrintToConsoleAll("[TC-S] Possible tank: %s", name);
+    }
+
     // If there are still no valid players, put everyone back into the pool.
     if (GetArraySize(infectedPool) == 0) {
+        if (GetConVarBool(hTankDebug)) {
+            PrintToConsoleAll("[TC-S] No valid tanks, reseting pool.");
+        }
         infectedPool = teamSteamIds(L4D2Team_Infected);
         h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, false);
         h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, true);
