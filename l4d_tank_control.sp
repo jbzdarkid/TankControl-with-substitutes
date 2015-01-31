@@ -7,6 +7,16 @@
 #include <left4downtown>
 #include <colors>
 
+#define DEBUG 1
+
+public Action:TestDebug(client, args) {
+    #if DEBUG
+        PrintToConsoleAll("[TC-S] Debug is enabled");
+        return;
+    #endif
+    PrintToConsoleAll("[TC-S] Debug is disabled");
+}
+
 #define IS_VALID_CLIENT(%1)     (%1 > 0 && %1 <= MaxClients)
 #define IS_INFECTED(%1)         (GetClientTeam(%1) == 3)
 #define IS_VALID_INGAME(%1)     (IS_VALID_CLIENT(%1) && IsClientInGame(%1))
@@ -130,6 +140,7 @@ public OnPluginStart()
     RegConsoleCmd("sm_tank", Tank_Cmd, "Shows who is becoming the tank.");
     RegConsoleCmd("sm_boss", Tank_Cmd, "Shows who is becoming the tank.");
     RegConsoleCmd("sm_witch", Tank_Cmd, "Shows who is becoming the tank.");
+    RegConsoleCmd("tankcontrol_debug", TestDebug, "Shows if debug is enabled");
     
     // Admin commands
     RegAdminCmd("sm_tankshuffle", TankShuffle_Cmd, ADMFLAG_SLAY, "Re-picks at random someone to become tank.");
@@ -137,7 +148,6 @@ public OnPluginStart()
     
     // Cvars
     hTankPrint = CreateConVar("tankcontrol_print_all", "1", "Who gets to see who will become the tank? (0 = Infected, 1 = Everyone)", FCVAR_PLUGIN);
-    hTankDebug = CreateConVar("tankcontrol_debug", "0", "Whether or not to debug to console", FCVAR_PLUGIN);
 }
 
 /**
@@ -249,9 +259,9 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
                 if (strcmp(substitutes[i][0], "") != 0) {
                     substitutes[i][1] = "";
                     wasRejoin = true;
-                    if (GetConVarBool(hTankDebug)) {
+                    #if DEBUG
                         PrintToConsoleAll("[TC-S] Player has rejoined.");
-                    }
+                    #endif
                     break;
                 }
             }
@@ -262,22 +272,22 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         }
         if (!wasRejoin) {
             if (firstOpen == -1) {
-                if (GetConVarBool(hTankDebug)) {
+                #if DEBUG
                     PrintToConsoleAll("[TC-S] Joining player couldn't find a substitute spot.");
-                }
+                #endif
                 return;
             }
             if (index == -1) { // A new player, assume they sub for the first person who needs it.
                 substitutes[firstOpen][0] = steamId;
-                if (GetConVarBool(hTankDebug)) {
+                #if DEBUG
                     PrintToConsoleAll("[TC-S] Player substitute accepted.");
-                }
+                #endif
             } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
                 substitutes[index][1] = substitutes[firstOpen][1];
                 substitutes[firstOpen][1] = "";
-                if (GetConVarBool(hTankDebug)) {
+                #if DEBUG
                     PrintToConsoleAll("[TC-S] Player has rejoined, cleaning substitutions.");
-                }
+                #endif
             }
         }
     }
@@ -303,9 +313,9 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
             if (firstOpen != -1) {
                 substitutes[firstOpen][1] = steamId;
             } else { // If there are no open spots, then all 8 original players have already left. In that case, this player must have been a substitute.
-                if (GetConVarBool(hTankDebug)) {
+                #if DEBUG
                     PrintToConsoleAll("[TC-S] Leaving player couldn't find substitute spot.");
-                }
+                #endif
             }
         }
     }
@@ -466,16 +476,16 @@ public chooseTank()
     // Remove players who've already had tank from the pool.
     infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, true);
     
-    if (GetConVarBool(hTankDebug)) {
+    #if DEBUG
         PrintToConsoleAll("[TC-S] Choosing tank from original players...");
-    }
+    #endif
     
     // If there are no valid players, select from the actual players playing, i.e. include possible substitutes.
     if (GetArraySize(infectedPool) == 0) {
-        if (GetConVarBool(hTankDebug)) {
+        #if DEBUG
             PrintToConsoleAll("[TC-S] No tanks in original pool.");
             PrintToConsoleAll("[TC-S] Choosing tank from substitutes...");
-        }
+        #endif
         infectedPool = teamSteamIds(L4D2Team_Infected);
         infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank, false);
     }
@@ -494,9 +504,9 @@ public chooseTank()
 
     // If there are still no valid players, put everyone back into the pool.
     if (GetArraySize(infectedPool) == 0) {
-        if (GetConVarBool(hTankDebug)) {
+        #if DEBUG
             PrintToConsoleAll("[TC-S] No valid tanks, reseting pool.");
-        }
+        #endif
         infectedPool = teamSteamIds(L4D2Team_Infected);
         h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, false);
         h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedPool, true);
@@ -737,7 +747,7 @@ public getInfectedPlayerBySteamId(const String:steamId[])
 stock PrintToConsoleAll(const String:format[], any:...)
 {
     decl String:text[192];
-    for (new x = 1; x <= MaxClients; x++)
+    for (new x = 0; x <= MaxClients; x++)
     {
         if (IsClientInGame(x))
         {
