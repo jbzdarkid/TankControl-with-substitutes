@@ -137,7 +137,7 @@ public OnPluginStart()
     
     // Cvars
     hTankPrint = CreateConVar("tankcontrol_print_all", "1", "Who gets to see who will become the tank? (0 = Infected, 1 = Everyone)", FCVAR_PLUGIN);
-    hTankDebug = CreateConVar("tankcontrol_debug", "0", "Whether or not to debug to console", FCVAR_PLUGIN);
+    hTankDebug = CreateConVar("tankcontrol_debug", "1", "Whether or not to debug to console", FCVAR_PLUGIN);
 }
 
 /**
@@ -260,17 +260,17 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         }
         if (!wasRejoin) {
             if (firstOpen == -1) {
-                LogMessage("[TC-S] ERROR: Joining player couldn't find a substitute spot.");
+                CPrintToChatAll("[TC-S] ERROR: Joining player couldn't find a substitute spot.");
             } else if (index == -1) { // A new player, assume they sub for the first person who needs it.
                 substitutes[firstOpen][0] = steamId;
-                LogMessage("[TC-S] Player substitute accepted.");
+                CPrintToChatAll("[TC-S] Player substitute accepted.");
             } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
                 substitutes[index][1] = substitutes[firstOpen][1];
                 substitutes[firstOpen][1] = "";
-                LogMessage("[TC-S] Player has rejoined, cleaning substitutions.");
+                CPrintToChatAll("[TC-S] Player has rejoined, cleaning substitutions.");
             }
         } else {
-            LogMessage("[TC-S] Player has rejoined.");
+            CPrintToChatAll("[TC-S] Player has rejoined.");
         }
     }
     
@@ -294,12 +294,12 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         if (newPlayer) {
             if (firstOpen != -1) {
                 substitutes[firstOpen][1] = steamId;
-                LogMessage("[TC-S] Player leaving, opening substitute spot");
+                CPrintToChatAll("[TC-S] Player leaving, opening substitute spot");
             } else { // If there are no open spots, then all 8 original players have already left. In that case, this player must have been a substitute.
-                LogMessage("[TC-S] ERROR: Leaving player couldn't find substitute spot.");
+                CPrintToChatAll("[TC-S] ERROR: Leaving player couldn't find substitute spot.");
             }
         } else {
-            LogMessage("[TC-S] Substitute player leaving, re-opening spot.");
+            CPrintToChatAll("[TC-S] Substitute player leaving, re-opening spot.");
         }
     }
 
