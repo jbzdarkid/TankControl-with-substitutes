@@ -261,6 +261,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         if (!wasRejoin) {
             if (firstOpen == -1) {
                 LogMessage("[TC-S] ERROR: Joining player couldn't find a substitute spot.");
+                // If we consistently get 4 of these, don't call it an error.
             } else if (index == -1) { // A new player, assume they sub for the first person who needs it.
                 substitutes[firstOpen][0] = steamId;
                 LogMessage("[TC-S] Player substitute accepted.");
