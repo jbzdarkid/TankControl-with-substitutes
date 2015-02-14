@@ -20,6 +20,7 @@ new Handle:hTankDebug;
 // A list of substitutions that have occured.
 // [substitute slot][substitute/substitutee] = steamid
 new String:substitutes[8][2][64];
+new bool:liveRound;
 
 public Plugin:myinfo =
 {
@@ -172,6 +173,7 @@ public Action:newGame(Handle:timer)
 {
     new teamAScore = L4D2Direct_GetVSCampaignScore(0);
     new teamBScore = L4D2Direct_GetVSCampaignScore(1);
+    liveRound = false;
     
     // If it's a new game, reset the tank pool and substitute list
     if (teamAScore == 0 && teamBScore == 0)
@@ -204,6 +206,7 @@ public RoundEnd_Event(Handle:event, const String:name[], bool:dontBroadcast)
  
 public PlayerLeftStartArea_Event(Handle:event, const String:name[], bool:dontBroadcast)
 {
+    liveRound = true;
     // Only choose a tank if nobody has been queued
     if (! strcmp(queuedTankSteamId, ""))
     {
@@ -238,7 +241,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     GetClientAuthString(client, steamId, sizeof(steamId));
     
     // When a player joins the game, figure out who they substituted for.
-    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor) {
+    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
         new index = -1;
         new firstOpen = -1;
         new bool:wasRejoin = false;
@@ -276,7 +279,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     }
     
     // When a player leaves the game, prepare for a substitute player to arrive.
-    if (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor) {
+    if (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
         new bool:newPlayer = true;
         new firstOpen = -1;
         for (new i = 0; i < 8; i++) {
