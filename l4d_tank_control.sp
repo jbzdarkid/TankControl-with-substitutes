@@ -173,11 +173,12 @@ public Action:newGame(Handle:timer)
 {
     new teamAScore = L4D2Direct_GetVSCampaignScore(0);
     new teamBScore = L4D2Direct_GetVSCampaignScore(1);
-    liveRound = false;
     
     // If it's a new game, reset the tank pool and substitute list
     if (teamAScore == 0 && teamBScore == 0)
     {
+        LogMessage("[TC-S] New game, resetting substitues.");
+        liveRound = false;
         h_whosHadTank = CreateArray(64);
         queuedTankSteamId = "";
         for (new i = 0; i < 8; i++) {
@@ -241,46 +242,9 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     decl String:steamId[64];
     GetClientAuthString(client, steamId, sizeof(steamId));
     LogMessage("Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
-    
-    // When a player joins the game, figure out who they substituted for.
-    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
-        new index = -1;
-        new firstOpen = -1;
-        new bool:wasRejoin = false;
-        for (new i = 0; i < 8; i++) {
-            // If the player who is joining has previously left
-            if (strcmp(substitutes[i][1], steamId) == 0) {
-                index = i;
-                // If nobody has replaced them yet,
-                if (strcmp(substitutes[i][0], "") != 0) {
-                    substitutes[i][1] = "";
-                    wasRejoin = true;
-                    break;
-                }
-            }
-            if (strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") != 0 && firstOpen == -1) {
-                // A pair which looks like ["", steamid], which represents a substitute request.
-                firstOpen = i;
-            }
-        }
-        if (!wasRejoin) {
-            if (firstOpen == -1) {
-                LogMessage("[TC-S] ERROR: Joining player %scouldn't find a substitute spot.", steamId);
-            } else if (index == -1) { // A new player, assume they sub for the first person who needs it.
-                substitutes[firstOpen][0] = steamId;
-                LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][1]);
-            } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
-                substitutes[index][1] = substitutes[firstOpen][1];
-                substitutes[firstOpen][1] = "";
-                LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
-            }
-        } else {
-            LogMessage("[TC-S] Player %s has rejoined.", steamId);
-        }
-    }
-    
+
     // When a player leaves the game, prepare for a substitute player to arrive.
-    if (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
+    if (oldTeam == L4D2Team:L4D2Team_Survivor || oldTeam == L4D2Team:L4D2Team_Infected && liveRound) {
         new bool:newPlayer = true;
         new firstOpen = -1;
         new index = -1;
@@ -310,6 +274,43 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         }
     }
 
+    // When a player joins the game, figure out who they substituted for.
+    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
+        new index = -1;
+        new firstOpen = -1;
+        new bool:wasRejoin = false;
+        for (new i = 0; i < 8; i++) {
+            // If the player who is joining has previously left
+            if (strcmp(substitutes[i][1], steamId) == 0) {
+                index = i;
+                // If nobody has replaced them yet,
+                if (strcmp(substitutes[i][0], "") != 0) {
+                    substitutes[i][1] = "";
+                    wasRejoin = true;
+                    break;
+                }
+            }
+            if (strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") != 0 && firstOpen == -1) {
+                // A pair which looks like ["", steamid], which represents a substitute request.
+                firstOpen = i;
+            }
+        }
+        if (!wasRejoin) {
+            if (firstOpen == -1) {
+                LogMessage("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
+            } else if (index == -1) { // A new player, assume they sub for the first person who needs it.
+                substitutes[firstOpen][0] = steamId;
+                LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][1]);
+            } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
+                substitutes[index][1] = substitutes[firstOpen][1];
+                substitutes[firstOpen][1] = "";
+                LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
+            }
+        } else {
+            LogMessage("[TC-S] Player %s has rejoined.", steamId);
+        }
+    }
+    
     decl String:tmpSteamId[64];
     if (oldTeam == L4D2Team:L4D2Team_Infected)
     {
