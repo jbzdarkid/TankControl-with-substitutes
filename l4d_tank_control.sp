@@ -174,11 +174,12 @@ public Action:newGame(Handle:timer)
     new teamAScore = L4D2Direct_GetVSCampaignScore(0);
     new teamBScore = L4D2Direct_GetVSCampaignScore(1);
     
+    LogMessage("[TC-S] New round, blocking substitutes until game goes live.");
+    liveRound = false;
     // If it's a new game, reset the tank pool and substitute list
     if (teamAScore == 0 && teamBScore == 0)
     {
         LogMessage("[TC-S] New game, resetting substitues.");
-        liveRound = false;
         h_whosHadTank = CreateArray(64);
         queuedTankSteamId = "";
         for (new i = 0; i < 8; i++) {
@@ -207,6 +208,7 @@ public RoundEnd_Event(Handle:event, const String:name[], bool:dontBroadcast)
  
 public PlayerLeftStartArea_Event(Handle:event, const String:name[], bool:dontBroadcast)
 {
+    LogMessage("Round went live, allowing substitutions.");
     liveRound = true;
     // Only choose a tank if nobody has been queued
     if (! strcmp(queuedTankSteamId, ""))
