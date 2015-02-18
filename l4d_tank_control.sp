@@ -179,7 +179,7 @@ public Action:newGame(Handle:timer)
     // If it's a new game, reset the tank pool and substitute list
     if (teamAScore == 0 && teamBScore == 0)
     {
-        LogMessage("[TC-S] New game, resetting substitues.");
+        LogMessage("[TC-S] New game, resetting substitutes.");
         h_whosHadTank = CreateArray(64);
         queuedTankSteamId = "";
         for (new i = 0; i < 8; i++) {
@@ -246,7 +246,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     LogMessage("Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
 
     // When a player leaves the game, prepare for a substitute player to arrive.
-    if (oldTeam == L4D2Team:L4D2Team_Survivor || oldTeam == L4D2Team:L4D2Team_Infected && liveRound) {
+    if (oldTeam == L4D2Team:L4D2Team_Survivor || oldTeam == L4D2Team:L4D2Team_Infected && liveRound == true) {
         new bool:newPlayer = true;
         new firstOpen = -1;
         new index = -1;
@@ -277,7 +277,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     }
 
     // When a player joins the game, figure out who they substituted for.
-    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound) {
+    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound == true) {
         new index = -1;
         new firstOpen = -1;
         new bool:wasRejoin = false;
