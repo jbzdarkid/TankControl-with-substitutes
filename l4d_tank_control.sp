@@ -13,22 +13,21 @@
 #define IS_VALID_INFECTED(%1)   (IS_VALID_INGAME(%1) && IS_INFECTED(%1))
 
 new Handle:h_whosHadTank;
-new Handle:h_tankQueue;
 new String:queuedTankSteamId[64];
 new Handle:hTankPrint;
 new Handle:hTankDebug;
 // A list of substitutions that have occured.
-// [substitute slot][substitute/substitutee] = steamid
+// [substitute slot][(player who left,player who replaced them)] = steamid
 new String:substitutes[8][2][64];
-new bool:liveRound;
+new bool:gameStarted;
 
 public Plugin:myinfo =
 {
     name = "L4D2 Tank Control",
     author = "arti, darkid",
     description = "Distributes the role of the tank evenly throughout the team",
-    version = "0.2.2",
-    url = "https://github.com/alexberriman/l4d2-plugins/tree/master/l4d_tank_control"
+    version = "0.0.16+",
+    url = "https://github.com/jbzdarkid/TankControl-with-substitutes"
 }
 
 enum L4D2Team
@@ -49,67 +48,6 @@ enum ZClass
     ZClass_Charger = 6,
     ZClass_Witch = 7,
     ZClass_Tank = 8
-}
-
-public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
-{
-    CreateNative("TankControl_GetTankPool", Native_GetTankPool);
-    CreateNative("TankControl_SetTank", Native_SetTank);
-    
-    return APLRes_Success;
-}
-
-/**
- * Set the player to become tank
- */
- 
-public Native_SetTank(Handle:plugin, numParams)
-{
-    new len;
-    GetNativeStringLength(1, len);
-
-    if (len <= 0)
-    {
-        return;
-    }
-
-    // Retrieve the arg
-    new String:steamId[len + 1];
-    GetNativeString(1, steamId, len + 1);
-    
-    // Queue that bad boy
-    strcopy(queuedTankSteamId, sizeof(queuedTankSteamId), steamId);
-}
-
-/**
- * Native to retrieve the players currently available in the tank queued
- */
-
-public Native_GetTankPool(Handle:plugin, numParams)
-{
-    // Create our pool of players to choose from
-    h_tankQueue = teamSteamIds(L4D2Team_Infected);
-    
-    // If there is nobody on the infected team, return (otherwise we'd be stuck trying to select forever)
-    if (GetArraySize(h_tankQueue) == 0)
-        return _:h_tankQueue;
-    
-    // Remove players who've already had tank from the pool.
-    h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank);
-    
-    // If the infected pool is empty, remove infected players from pool
-    if (GetArraySize(h_tankQueue) == 0) // (when nobody on infected ,error)
-    {
-        new Handle:infectedTeam = teamSteamIds(L4D2Team_Infected);
-        if (GetArraySize(infectedTeam) > 1)
-        {
-            h_whosHadTank = removeTanksFromPool(h_whosHadTank, teamSteamIds(L4D2Team_Infected));
-            h_tankQueue = removeTanksFromPool(h_tankQueue, h_whosHadTank);
-        }
-    }
-    
-    // Return the infected pool
-    return _:h_tankQueue;
 }
 
 public OnPluginStart()
@@ -139,6 +77,7 @@ public OnPluginStart()
     // Cvars
     hTankPrint = CreateConVar("tankcontrol_print_all", "1", "Who gets to see who will become the tank? (0 = Infected, 1 = Everyone)", FCVAR_PLUGIN);
     hTankDebug = CreateConVar("tankcontrol_debug", "0", "Whether or not to debug to console", FCVAR_PLUGIN);
+
 }
 
 /**
@@ -173,15 +112,14 @@ public Action:newGame(Handle:timer)
 {
     new teamAScore = L4D2Direct_GetVSCampaignScore(0);
     new teamBScore = L4D2Direct_GetVSCampaignScore(1);
+    gameStarted = false; // Don't track substitutes until the teams are picked. i.e. someone exits saferoom.
     
-    LogMessage("[TC-S] New round, blocking substitutes until game goes live.");
-    liveRound = false;
-    // If it's a new game, reset the tank pool and substitute list
+    // If it's a new game, reset the tank pool and substitute list.
     if (teamAScore == 0 && teamBScore == 0)
     {
-        LogMessage("[TC-S] New game, resetting substitutes.");
         h_whosHadTank = CreateArray(64);
         queuedTankSteamId = "";
+        LogMessage("[TC-S] New game, resetting substitutes.");
         for (new i = 0; i < 8; i++) {
             substitutes[i][0] = "";
             substitutes[i][1] = "";
@@ -200,33 +138,13 @@ public RoundEnd_Event(Handle:event, const String:name[], bool:dontBroadcast)
 
 /**
  * When a player leaves the start area, choose a tank and output to all.
- *
- * This method should only queue a new tank when:
- *  1. There is no tank queued, OR
- *  2. The queued tank doesn't pass validation (is not on infected team)
  */
  
 public PlayerLeftStartArea_Event(Handle:event, const String:name[], bool:dontBroadcast)
 {
-    LogMessage("Round went live, allowing substitutions.");
-    liveRound = true;
-    // Only choose a tank if nobody has been queued
-    if (! strcmp(queuedTankSteamId, ""))
-    {
-        chooseTank();
-    }
-    
-    // If the queued tank is not a valid infected player, choose another
-    else
-    {
-        new tankClientId = getInfectedPlayerBySteamId(queuedTankSteamId);
-        if (! IS_VALID_INFECTED(tankClientId))
-        {
-            chooseTank();
-        }
-    }
-    
-    
+    gameStarted = true;
+    LogMessage("[TC-S] Round went live, allowing substitutions.");
+    chooseTank();
     outputTankToAll();
 }
 
@@ -240,93 +158,95 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     new L4D2Team:newTeam = L4D2Team:GetEventInt(event, "team");
     new L4D2Team:oldTeam = L4D2Team:GetEventInt(event, "oldteam");
     new client = GetClientOfUserId(GetEventInt(event, "userid"));
-    if (client == 0 || !IsClientInGame(client) || IsFakeClient(client)) return;
     decl String:steamId[64];
     GetClientAuthString(client, steamId, sizeof(steamId));
-    LogMessage("Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
+    LogMessage("[TC-S] Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
+    
+    // A player joins a team.
+    if (client && gameStarted && (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor)) {
+        new index = -1; // Index (in substitutes[]) of the original player.
+        new firstOpen = -1; // Index (in substitutes[]) of the first empty sub spot.
+        new bool:wasRejoin = false; // If the player leaves and rejoins (crash, e.g.)
 
-    // When a player leaves the game, prepare for a substitute player to arrive.
-    if (oldTeam == L4D2Team:L4D2Team_Survivor || oldTeam == L4D2Team:L4D2Team_Infected && liveRound == true) {
-        new bool:newPlayer = true;
-        new firstOpen = -1;
-        new index = -1;
-        for (new i = 0; i < 8; i++) {
-            // If the player was already a substitute, simply mark the slot they substituted for as free again.
-            if (strcmp(substitutes[i][0], steamId) == 0) {
-                substitutes[i][0] = "";
-                index = i;
-                newPlayer = false;
-                break;
-            }
-            if (strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") == 0 && firstOpen == -1) {
-                // A pair which looks like ["", ""], which represents a free spot.
+        // First, find if there was an open substitute spot (someone left, this person is joining)
+        for (new i=0; i<8; i++) {
+            // Finding the first open substitute spot.
+            if (firstOpen == -1 && strcmp(substitutes[i][0], "") != 0 && strcmp(substitutes[i][1], "") == 0) {
                 firstOpen = i;
             }
-        }
-        // If the player was not already a substitute, create a new substitute slot for them.
-        if (newPlayer) {
-            if (firstOpen != -1) {
-                substitutes[firstOpen][1] = steamId;
-                LogMessage("[TC-S] Player %s leaving, opening substitute spot %d.", steamId, firstOpen);
-            } else { // If there are no open spots, then all 8 original players have already left. In that case, this player must have been a substitute.
-                LogMessage("[TC-S] ERROR: Leaving player %s couldn't find substitute spot.", steamId);
-            }
-        } else {
-            LogMessage("[TC-S] Substitute %s player leaving, re-opening spot %d.", steamId, index);
-        }
-    }
-
-    // When a player joins the game, figure out who they substituted for.
-    if (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor && liveRound == true) {
-        new index = -1;
-        new firstOpen = -1;
-        new bool:wasRejoin = false;
-        for (new i = 0; i < 8; i++) {
-            // If the player who is joining has previously left
-            if (strcmp(substitutes[i][1], steamId) == 0) {
+            
+            // If this substitute spot was created by the player leaving
+            if (strcmp(substitutes[i][0], steamId) == 0) {
                 index = i;
-                // If nobody has replaced them yet,
-                if (strcmp(substitutes[i][0], "") != 0) {
-                    substitutes[i][1] = "";
+                // If nobody has replaced them yet, wipe the substitute and ignore.
+                if (strcmp(substitutes[i][1], "") == 0) {
                     wasRejoin = true;
                     break;
                 }
             }
-            if (strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") != 0 && firstOpen == -1) {
-                // A pair which looks like ["", steamid], which represents a substitute request.
-                firstOpen = i;
-            }
         }
-        if (!wasRejoin) {
+        // Simple rejoin, wipe substitute spot
+        if (wasRejoin) {
+            LogMessage("[TC-S] Player %s has rejoined.", steamId);
+            substitutes[index][0] = "";
+        } else {
+            // No available substitute spot. This may be thrown incorrectly at the start of game. ###
             if (firstOpen == -1) {
                 LogMessage("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
-            } else if (index == -1) { // A new player, assume they sub for the first person who needs it.
-                substitutes[firstOpen][0] = steamId;
-                LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][1]);
-            } else { // A player rejoins, so simply pretend they never left and their substitute is replacing the recently departed player.
-                substitutes[index][1] = substitutes[firstOpen][1];
-                substitutes[firstOpen][1] = "";
+            // The player has not played in this game, so sub them into the first sub spot.
+            } else if (index == -1) {
+                substitutes[firstOpen][1] = steamId;
+                LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][0]);
+            // Player A leaves, is subbed for by player B, then player C leaves, and player A rejoins. We simplify by saying player B is substituting for player C.
+            // substitutes[index] = [A, B]
+            // substitutes[firstOpen] = [C, ""]
+            } else {
+                substitutes[firstOpen][1] = substitutes[index][1];
+                substitutes[index][0] = "";
                 LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
             }
-        } else {
-            LogMessage("[TC-S] Player %s has rejoined.", steamId);
         }
     }
-    
-    decl String:tmpSteamId[64];
-    if (oldTeam == L4D2Team:L4D2Team_Infected)
-    {
-        GetClientAuthString(client, tmpSteamId, sizeof(tmpSteamId));
-        if (strcmp(queuedTankSteamId, tmpSteamId) == 0)
+
+    // When a player leaves the game, prepare for a substitute player to arrive.
+    if (client && gameStarted && (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor)) {
+        GetClientAuthString(client, steamId, sizeof(steamId));
+        // If the player was tank, choose a new tank.
+        if (strcmp(queuedTankSteamId, steamId) == 0)
         {
             chooseTank();
             outputTankToAll();
+        }
+        new firstOpen = -1; // Index (in substitutes[]) of the first empty slot.
+        new index = -1; // Index (in substitutes[]) of the substitute.
+        for (new i=0; i<8; i++) {
+            // If the player was already a substitute
+            if (strcmp(substitutes[i][1], steamId) == 0) {
+                index = i;
+                break;
+            }
+            // Finding the first open substitute spot.
+            if (firstOpen == -1 && strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") == 0) {
+                firstOpen = i;
+            }
+        }
+        // No available substitute spot. This is an error.
+        if (firstOpen == -1) {
+            LogMessage("[TC-S] ERROR: Leaving player %s couldn't find substitute spot.", steamId);
+        // Substitute spot available, and player not already listed. One of the original players is leaving.
+        } else if (index == -1) {
+            substitutes[firstOpen][0] = steamId;
+            LogMessage("[TC-S] Player %s leaving, opening substitute spot %d.", steamId, firstOpen);
+        // Player already listed (i.e. was substitute), so re-open substitute spot.
+        } else {
+            substitutes[index][1] = "";
+            LogMessage("[TC-S] Substitute player %s leaving, re-opening spot %d.", steamId, index);
         }
     }
 }
 
 /**
- * When the tank dies, requeue a player to become tank (for finales)
+ * When the tank dies, choose a new player to become tank (for finales)
  */
  
 public PlayerDeath_Event(Handle:event, const String:name[], bool:dontBroadcast)
@@ -360,7 +280,7 @@ public TankKilled_Event(Handle:event, const String:name[], bool:dontBroadcast)
 
 
 /**
- * When a player wants to find out whos becoming tank,
+ * When a player wants to find out who's becoming tank,
  * output to them.
  */
  
@@ -404,7 +324,7 @@ public Action:Tank_Cmd(client, args)
 
 /**
  * Shuffle the tank (randomly give to another player in
- * the pool.
+ * the pool.)
  */
  
 public Action:TankShuffle_Cmd(client, args)
@@ -421,7 +341,7 @@ public Action:TankShuffle_Cmd(client, args)
  
 public Action:GiveTank_Cmd(client, args)
 {
-    // Who are we targetting?
+    // Who are we targeting?
     new String:arg1[32];
     GetCmdArg(1, arg1, sizeof(arg1));
     
@@ -459,12 +379,16 @@ public Action:GiveTank_Cmd(client, args)
 /**
  * Selects a player on the infected team from random who hasn't been
  * tank and gives it to them.
+ *
+ * With substitutes, we select from the original 4 players. If any of them haven't had tank, we give it to them, or their substitute.
+ * If all 4 have, we look through the substitutes.
+ * If all 4 original players and substitutes have had tank, we give all players equal odds at the next tank.
  */
  
 public chooseTank()
 {
     // Create our pool of players to choose from
-    new Handle:infectedPool = teamSteamIds(L4D2Team_Infected);
+    new Handle:infectedPool = teamSteamIds(L4D2Team_Infected, true);
     
     // If there is nobody on the infected team, return (otherwise we'd be stuck trying to select forever)
     if (GetArraySize(infectedPool) == 0)
@@ -473,26 +397,43 @@ public chooseTank()
     // Remove players who've already had tank from the pool.
     infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank);
     
-    // If the infected pool is empty, remove infected players from pool
-    if (GetArraySize(infectedPool) == 0) // (when nobody on infected ,error)
+    // If the infected pool is empty, then consider substitutes.
+    if (GetArraySize(infectedPool) == 0)
     {
-        new Handle:infectedTeam = teamSteamIds(L4D2Team_Infected);
-        if (GetArraySize(infectedTeam) > 1)
+        infectedPool = teamSteamIds(L4D2Team_Infected, false);
+        infectedPool = removeTanksFromPool(infectedPool, h_whosHadTank);
+        // If the pool is still empty, all substitutes have had tank. Wipe the substitutes and start over.
+        if (GetArraySize(infectedPool) == 0)
         {
-            h_whosHadTank = removeTanksFromPool(h_whosHadTank, teamSteamIds(L4D2Team_Infected));
+            new Handle:infectedSubs = teamSteamIds(L4D2Team_Infected, false);
+            h_whosHadTank = removeTanksFromPool(h_whosHadTank, infectedSubs);
+            h_whosHadTank = removeTanksFromPool(h_whosHadTank, teamSteamIds(L4D2Team_Infected, true));
+            for (new i=0; i<64; i++) {
+                new String:steamId[64];
+                GetArrayString(infectedSubs, i, steamId, sizeof(steamId));
+                for (new j=0; j<8; j++) {
+                    if (strcmp(substitutes[j][1], steamId) == 0) {
+                        substitutes[j][0] = "";
+                        substitutes[j][1] = "";
+                        break;
+                    }
+                }
+            }
             chooseTank();
+            return;
         }
-        else
-        {
-            queuedTankSteamId = "";
-        }
-        
-        return;
     }
     
     // Select a random person to become tank
     new rndIndex = GetRandomInt(0, GetArraySize(infectedPool) - 1);
     GetArrayString(infectedPool, rndIndex, queuedTankSteamId, sizeof(queuedTankSteamId));
+    for (new i=0; i<8; i++) {
+        // If the selected player was substituted, choose their substitute for tank.
+        if (strcmp(substitutes[i][0], queuedTankSteamId) == 0) {
+            queuedTankSteamId = substitutes[i][1];
+            break;
+        }
+    }
 }
 
 /**
@@ -528,6 +469,14 @@ public Action:L4D_OnTryOfferingTankBot(tank_index, &bool:enterStatis)
     {
         setTankTickets(queuedTankSteamId, 20000);
         PushArrayString(h_whosHadTank, queuedTankSteamId);
+        for (new i=0; i<8; i++) {
+            // If the player is a substitute, we add the original player's name.
+            // In other words, if your substitute gets the tank, so do you.
+            if (strcmp(substitutes[i][1], queuedTankSteamId) == 0) {
+                PushArrayString(h_whosHadTank, substitutes[i][0]);
+                break;
+            }
+        }
     }
     
     return Plugin_Continue;
@@ -573,13 +522,6 @@ public outputTankToAll()
     }
 }
 
-/**
- * Prints a message to the infected team
- *
- * @param String:Message[]
- *  The message to print
- */
- 
 stock PrintToInfected(const String:Message[], any:... )
 {
     decl String:sPrint[256];
@@ -595,7 +537,6 @@ stock PrintToInfected(const String:Message[], any:... )
         CPrintToChat(i, "{default}%s", sPrint);
     }
 }
-
 /**
  * Returns an array of steam ids for a particular team.
  *
@@ -606,7 +547,7 @@ stock PrintToInfected(const String:Message[], any:... )
  *     An array of steam ids.
  */
  
-public Handle:teamSteamIds(L4D2Team:team)
+public Handle:teamSteamIds(L4D2Team:team, bool:original)
 {
     new Handle:steamIds = CreateArray(64);
     decl String:steamId[64];
@@ -621,6 +562,15 @@ public Handle:teamSteamIds(L4D2Team:team)
                 continue;
         
             GetClientAuthString(i, steamId, sizeof(steamId));
+            if (original) {
+                for (new j=0; j<8; j++) {
+                    // If this player was a substitute
+                    if (strcmp(substitutes[j][1], steamId) == 0) {
+                        steamId = substitutes[j][0];
+                        break;
+                    }
+                }
+            }
             PushArrayString(steamIds, steamId);
         }
     }
@@ -633,7 +583,7 @@ public Handle:teamSteamIds(L4D2Team:team)
  *
  * @param Handle:steamIdTankPool
  *     The pool of potential steam ids to become tank.
- * @ param Handle:tanks
+ * @param Handle:tanks
  *     The steam ids of players who've already had tank.
  *
  * @return
