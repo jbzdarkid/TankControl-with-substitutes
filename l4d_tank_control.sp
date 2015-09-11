@@ -164,72 +164,51 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
     
     // A player joins a team.
     if (client && gameStarted && (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor)) {
-        new index = -1; // Index (in substitutes[]) of the original player.
-        new firstOpen = -1; // Index (in substitutes[]) of the first empty sub spot.
-        new bool:wasRejoin = false; // If the player leaves and rejoins (crash, e.g.)
-
-        // First, find if there was an open substitute spot (someone left, this person is joining)
+        new index = -1;
+        new firstOpen = -1;
         for (new i=0; i<8; i++) {
-            // Finding the first open substitute spot.
             if (firstOpen == -1 && strcmp(substitutes[i][0], "") != 0 && strcmp(substitutes[i][1], "") == 0) {
                 firstOpen = i;
             }
-            
-            // If this substitute spot was created by the player leaving
             if (strcmp(substitutes[i][0], steamId) == 0) {
                 index = i;
-                // If nobody has replaced them yet, wipe the substitute and ignore.
-                if (strcmp(substitutes[i][1], "") == 0) {
-                    wasRejoin = true;
-                    break;
-                }
             }
         }
-        // Simple rejoin, wipe substitute spot
-        if (wasRejoin) {
-            LogMessage("[TC-S] Player %s has rejoined.", steamId);
+        
+        // No available substitute spot. This may be thrown incorrectly at the start of game. ###
+        if (firstOpen == -1) {
+            LogMessage("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
+        // The player has not played in this game, so sub them into the first sub spot.
+        } else if (index == -1) {
+            substitutes[firstOpen][1] = steamId;
+            LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][0]);
+        // The player leaves and rejoins (crash, e.g.)
+        } else if (strcmp(substitutes[index][1], "") == 0) {
             substitutes[index][0] = "";
+            LogMessage("[TC-S] Player %s has rejoined.", steamId);
+        // Player A leaves, is subbed for by player B, then player C leaves, and player A rejoins. We simplify by saying player B is substituting for player C.
+        // substitutes[index] = [A, B]
+        // substitutes[firstOpen] = [C, ""]
         } else {
-            // No available substitute spot. This may be thrown incorrectly at the start of game. ###
-            if (firstOpen == -1) {
-                LogMessage("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
-            // The player has not played in this game, so sub them into the first sub spot.
-            } else if (index == -1) {
-                substitutes[firstOpen][1] = steamId;
-                LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][0]);
-            // Player A leaves, is subbed for by player B, then player C leaves, and player A rejoins. We simplify by saying player B is substituting for player C.
-            // substitutes[index] = [A, B]
-            // substitutes[firstOpen] = [C, ""]
-            } else {
-                substitutes[firstOpen][1] = substitutes[index][1];
-                substitutes[index][0] = "";
-                LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
-            }
+            substitutes[firstOpen][1] = substitutes[index][1];
+            substitutes[index][0] = "";
+            LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
         }
     }
 
     // When a player leaves the game, prepare for a substitute player to arrive.
     if (client && gameStarted && (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor)) {
-        GetClientAuthString(client, steamId, sizeof(steamId));
-        // If the player was tank, choose a new tank.
-        if (strcmp(queuedTankSteamId, steamId) == 0)
-        {
-            chooseTank();
-            outputTankToAll();
-        }
-        new firstOpen = -1; // Index (in substitutes[]) of the first empty slot.
-        new index = -1; // Index (in substitutes[]) of the substitute.
+        new firstOpen = -1;
+        new index = -1;
         for (new i=0; i<8; i++) {
-            // If the player was already a substitute
-            if (strcmp(substitutes[i][1], steamId) == 0) {
-                index = i;
-                break;
-            }
-            // Finding the first open substitute spot.
             if (firstOpen == -1 && strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") == 0) {
                 firstOpen = i;
             }
+            if (strcmp(substitutes[i][1], steamId) == 0) {
+                index = i;
+            }
         }
+
         // No available substitute spot. This is an error.
         if (firstOpen == -1) {
             LogMessage("[TC-S] ERROR: Leaving player %s couldn't find substitute spot.", steamId);
@@ -241,6 +220,13 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
         } else {
             substitutes[index][1] = "";
             LogMessage("[TC-S] Substitute player %s leaving, re-opening spot %d.", steamId, index);
+        }
+
+        // If the player was tank, choose a new tank.
+        if (strcmp(queuedTankSteamId, steamId) == 0)
+        {
+            chooseTank();
+            outputTankToAll();
         }
     }
 }
