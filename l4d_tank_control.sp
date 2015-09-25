@@ -38,45 +38,41 @@ enum L4D2Team
     L4D2Team_Infected
 }
 
-enum ZClass
-{
-    ZClass_Smoker = 1,
-    ZClass_Boomer = 2,
-    ZClass_Hunter = 3,
-    ZClass_Spitter = 4,
-    ZClass_Jockey = 5,
-    ZClass_Charger = 6,
-    ZClass_Witch = 7,
-    ZClass_Tank = 8
+public Action:Debug(client, args) {
+    for (new i=0; i<8; i++) {
+        PrintToChat(client, "Slot %d: '%s' -> '%s'", i, substitutes[i][0], substitutes[i][1]);
+    }
 }
 
 public OnPluginStart()
 {
+    RegConsoleCmd("tc_debug_subs", Debug, "Debug substitute array to chat");
+    
     // Load translations (for targeting player)
     LoadTranslations("common.phrases");
     
     // Event hooks
-    HookEvent("player_left_start_area", EventHook:PlayerLeftStartArea_Event, EventHookMode_PostNoCopy);
-    HookEvent("round_end", EventHook:RoundEnd_Event, EventHookMode_PostNoCopy);
-    HookEvent("player_team", EventHook:PlayerTeam_Event, EventHookMode_PostNoCopy);
-    HookEvent("tank_killed", EventHook:TankKilled_Event, EventHookMode_PostNoCopy);
-    HookEvent("player_death", EventHook:PlayerDeath_Event, EventHookMode_Post);
+    HookEvent("player_left_start_area", PlayerLeftStartArea);
+    HookEvent("round_end", RoundEnd);
+    HookEvent("player_team", PlayerTeam);
+    HookEvent("tank_killed", TankKilled);
+    HookEvent("player_death", PlayerDeath, EventHookMode_Post);
     
     // Initialise the tank arrays/data values
     h_whosHadTank = CreateArray(64);
     
     // Register the boss commands
-    RegConsoleCmd("sm_tank", Tank_Cmd, "Shows who is becoming the tank.");
-    RegConsoleCmd("sm_boss", Tank_Cmd, "Shows who is becoming the tank.");
-    RegConsoleCmd("sm_witch", Tank_Cmd, "Shows who is becoming the tank.");
+    RegConsoleCmd("sm_tank", PrintTank, "Shows who is becoming the tank.");
+    RegConsoleCmd("sm_boss", PrintTank, "Shows who is becoming the tank.");
+    RegConsoleCmd("sm_witch", PrintTank, "Shows who is becoming the tank.");
     
     // Admin commands
-    RegAdminCmd("sm_tankshuffle", TankShuffle_Cmd, ADMFLAG_SLAY, "Re-picks at random someone to become tank.");
-    RegAdminCmd("sm_givetank", GiveTank_Cmd, ADMFLAG_SLAY, "Gives the tank to a selected player");
+    RegAdminCmd("sm_tankshuffle", TankShuffle, ADMFLAG_SLAY, "Re-picks at random someone to become tank.");
+    RegAdminCmd("sm_givetank", GiveTank, ADMFLAG_SLAY, "Gives the tank to a selected player");
     
     // Cvars
     hTankPrint = CreateConVar("tankcontrol_print_all", "1", "Who gets to see who will become the tank? (0 = Infected, 1 = Everyone)", FCVAR_PLUGIN);
-    hTankDebug = CreateConVar("tankcontrol_debug", "0", "Whether or not to debug to console", FCVAR_PLUGIN);
+    hTankDebug = CreateConVar("tankcontrol_debug", "1", "Whether or not to debug to console", FCVAR_PLUGIN);
 
 }
 
@@ -119,7 +115,7 @@ public Action:newGame(Handle:timer)
     {
         h_whosHadTank = CreateArray(64);
         queuedTankSteamId = "";
-        LogMessage("[TC-S] New game, resetting substitutes.");
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] New game, resetting substitutes.");
         for (new i = 0; i < 8; i++) {
             substitutes[i][0] = "";
             substitutes[i][1] = "";
@@ -131,7 +127,7 @@ public Action:newGame(Handle:timer)
  * When the round ends, reset the active tank.
  */
  
-public RoundEnd_Event(Handle:event, const String:name[], bool:dontBroadcast)
+public RoundEnd(Handle:event, const String:name[], bool:dontBroadcast)
 {
     queuedTankSteamId = "";
 }
@@ -140,10 +136,10 @@ public RoundEnd_Event(Handle:event, const String:name[], bool:dontBroadcast)
  * When a player leaves the start area, choose a tank and output to all.
  */
  
-public PlayerLeftStartArea_Event(Handle:event, const String:name[], bool:dontBroadcast)
+public PlayerLeftStartArea(Handle:event, const String:name[], bool:dontBroadcast)
 {
     gameStarted = true;
-    LogMessage("[TC-S] Round went live, allowing substitutions.");
+    if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Round went live, allowing substitutions.");
     chooseTank();
     outputTankToAll();
 }
@@ -153,81 +149,94 @@ public PlayerLeftStartArea_Event(Handle:event, const String:name[], bool:dontBro
  * When a player switches teams, track for substitutions.
  */
  
-public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
+public PlayerTeam(Handle:event, const String:name[], bool:dontBroadcast)
 {
+    if (!gameStarted) return;
+    new client = GetClientOfUserId(GetEventInt(event, "userid"));
+    if (client <= 0 || client > MaxClients) return;
     new L4D2Team:newTeam = L4D2Team:GetEventInt(event, "team");
     new L4D2Team:oldTeam = L4D2Team:GetEventInt(event, "oldteam");
-    new client = GetClientOfUserId(GetEventInt(event, "userid"));
     decl String:steamId[64];
     GetClientAuthString(client, steamId, sizeof(steamId));
-    LogMessage("[TC-S] Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
+    if (strcmp(steamId, "BOT") == 0) return; // Ignore bots
+    if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Player %s changed from team %d to team %d", steamId, oldTeam, newTeam);
     
-    // A player joins a team.
-    if (client && gameStarted && (newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor)) {
-        new index = -1;
-        new firstOpen = -1;
-        for (new i=0; i<8; i++) {
-            if (firstOpen == -1 && strcmp(substitutes[i][0], "") != 0 && strcmp(substitutes[i][1], "") == 0) {
-                firstOpen = i;
-            }
-            if (strcmp(substitutes[i][0], steamId) == 0) {
-                index = i;
-            }
+    if ((newTeam == L4D2Team:L4D2Team_Infected || newTeam == L4D2Team:L4D2Team_Survivor)
+        && (oldTeam == L4D2Team:L4D2Team_None || oldTeam == L4D2Team:L4D2Team_Spectator)) {
+        PlayerJoin(steamId);
+    } else if ((newTeam == L4D2Team:L4D2Team_None || newTeam == L4D2Team:L4D2Team_Spectator)
+    && (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor)) {
+        PlayerLeave(steamId);
+    }
+}
+
+// When a player joins, check to see if they are a substitute, a new player, or an old player rejoining.
+PlayerJoin(String:steamId[64]) {
+    new index = -1;
+    new firstOpen = -1;
+    for (new i=0; i<8; i++) {
+        if (firstOpen == -1 && strcmp(substitutes[i][0], "") != 0 && strcmp(substitutes[i][1], "") == 0) {
+            firstOpen = i;
         }
-        
-        // No available substitute spot. This may be thrown incorrectly at the start of game. ###
-        if (firstOpen == -1) {
-            LogMessage("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
-        // The player has not played in this game, so sub them into the first sub spot.
-        } else if (index == -1) {
-            substitutes[firstOpen][1] = steamId;
-            LogMessage("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][0]);
-        // The player leaves and rejoins (crash, e.g.)
-        } else if (strcmp(substitutes[index][1], "") == 0) {
-            substitutes[index][0] = "";
-            LogMessage("[TC-S] Player %s has rejoined.", steamId);
-        // Player A leaves, is subbed for by player B, then player C leaves, and player A rejoins. We simplify by saying player B is substituting for player C.
-        // substitutes[index] = [A, B]
-        // substitutes[firstOpen] = [C, ""]
-        } else {
-            substitutes[firstOpen][1] = substitutes[index][1];
-            substitutes[index][0] = "";
-            LogMessage("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
+        if (strcmp(substitutes[i][0], steamId) == 0) {
+            index = i;
+        }
+    }
+    
+    // No available substitute spot. This may be thrown incorrectly at the start of game. ###
+    if (firstOpen == -1) {
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] ERROR: Joining player %s couldn't find a substitute spot.", steamId);
+    // The player has not played in this game, so sub them into the first sub spot.
+    } else if (index == -1) {
+        substitutes[firstOpen][1] = steamId;
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Player %s substituting for player %s.", steamId, substitutes[firstOpen][0]);
+    // The player leaves and rejoins (crash, e.g.)
+    } else if (strcmp(substitutes[index][1], "") == 0) {
+        substitutes[index][0] = "";
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Player %s has rejoined.", steamId);
+    // Player A leaves, is subbed for by player B, then player C leaves, and player A rejoins. We simplify by saying player B is substituting for player C.
+    // substitutes[index] = [A , B]  substitutes[firstOpen] = [C, ""]
+    // becomes:
+    // substitutes[index] = ["", ""] substitutes[firstOpen] = [C, B] 
+    } else {
+        substitutes[firstOpen][1] = substitutes[index][1];
+        substitutes[index][0] = "";
+        substitutes[index][1] = "";
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Player %s has rejoined, cleaning substitutions.", steamId);
+    }
+}
+
+// When a player leaves the game, prepare for a substitute player to arrive.
+PlayerLeave(String:steamId[64]) {
+    new firstOpen = -1;
+    new index = -1;
+    for (new i=0; i<8; i++) {
+        if (firstOpen == -1 && strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") == 0) {
+            firstOpen = i;
+        }
+        if (strcmp(substitutes[i][1], steamId) == 0) {
+            index = i;
         }
     }
 
-    // When a player leaves the game, prepare for a substitute player to arrive.
-    if (client && gameStarted && (oldTeam == L4D2Team:L4D2Team_Infected || oldTeam == L4D2Team:L4D2Team_Survivor)) {
-        new firstOpen = -1;
-        new index = -1;
-        for (new i=0; i<8; i++) {
-            if (firstOpen == -1 && strcmp(substitutes[i][0], "") == 0 && strcmp(substitutes[i][1], "") == 0) {
-                firstOpen = i;
-            }
-            if (strcmp(substitutes[i][1], steamId) == 0) {
-                index = i;
-            }
-        }
+    // No available substitute spot. This is an error.
+    if (firstOpen == -1) {
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] ERROR: Leaving player %s couldn't find substitute spot.", steamId);
+    // Substitute spot available, and player not already listed. One of the original players is leaving.
+    } else if (index == -1) {
+        substitutes[firstOpen][0] = steamId;
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Player %s leaving, opening substitute spot %d.", steamId, firstOpen);
+    // Player already listed (i.e. was substitute), so re-open substitute spot.
+    } else {
+        substitutes[index][1] = "";
+        if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC-S] Substitute player %s leaving, re-opening spot %d.", steamId, index);
+    }
 
-        // No available substitute spot. This is an error.
-        if (firstOpen == -1) {
-            LogMessage("[TC-S] ERROR: Leaving player %s couldn't find substitute spot.", steamId);
-        // Substitute spot available, and player not already listed. One of the original players is leaving.
-        } else if (index == -1) {
-            substitutes[firstOpen][0] = steamId;
-            LogMessage("[TC-S] Player %s leaving, opening substitute spot %d.", steamId, firstOpen);
-        // Player already listed (i.e. was substitute), so re-open substitute spot.
-        } else {
-            substitutes[index][1] = "";
-            LogMessage("[TC-S] Substitute player %s leaving, re-opening spot %d.", steamId, index);
-        }
-
-        // If the player was tank, choose a new tank.
-        if (strcmp(queuedTankSteamId, steamId) == 0)
-        {
-            chooseTank();
-            outputTankToAll();
-        }
+    // If the player was tank, choose a new tank.
+    if (strcmp(queuedTankSteamId, steamId) == 0)
+    {
+        chooseTank();
+        outputTankToAll();
     }
 }
 
@@ -235,7 +244,7 @@ public PlayerTeam_Event(Handle:event, const String:name[], bool:dontBroadcast)
  * When the tank dies, choose a new player to become tank (for finales)
  */
  
-public PlayerDeath_Event(Handle:event, const String:name[], bool:dontBroadcast)
+public PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 {
     new zombieClass = 0;
     new victimId = GetEventInt(event, "userid");
@@ -244,23 +253,17 @@ public PlayerDeath_Event(Handle:event, const String:name[], bool:dontBroadcast)
     if (victimId && IsClientInGame(victim))
     {
         zombieClass = GetEntProp(victim, Prop_Send, "m_zombieClass");
-        if (ZClass:zombieClass == ZClass_Tank)
+        if (zombieClass == 8)
         {
-            if (GetConVarBool(hTankDebug))
-            {
-                PrintToConsoleAll("[TC] Tank died(1), choosing a new tank");
-            }
+            if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC] Tank died(1), choosing a new tank");
             chooseTank();
         }
     }
 }
 
-public TankKilled_Event(Handle:event, const String:name[], bool:dontBroadcast)
+public TankKilled(Handle:event, const String:name[], bool:dontBroadcast)
 {
-    if (GetConVarBool(hTankDebug))
-    {
-        PrintToConsoleAll("[TC] Tank died(2), choosing a new tank");
-    }
+    if (GetConVarBool(hTankDebug)) PrintToConsoleAll("[TC] Tank died(2), choosing a new tank");
     chooseTank();
 }
 
@@ -270,7 +273,7 @@ public TankKilled_Event(Handle:event, const String:name[], bool:dontBroadcast)
  * output to them.
  */
  
-public Action:Tank_Cmd(client, args)
+public Action:PrintTank(client, args)
 {
     new tankClientId;
     decl String:tankClientName[128];
@@ -313,7 +316,7 @@ public Action:Tank_Cmd(client, args)
  * the pool.)
  */
  
-public Action:TankShuffle_Cmd(client, args)
+public Action:TankShuffle(client, args)
 {
     chooseTank();
     outputTankToAll();
@@ -325,7 +328,7 @@ public Action:TankShuffle_Cmd(client, args)
  * Give the tank to a specific player.
  */
  
-public Action:GiveTank_Cmd(client, args)
+public Action:GiveTank(client, args)
 {
     // Who are we targeting?
     new String:arg1[32];
